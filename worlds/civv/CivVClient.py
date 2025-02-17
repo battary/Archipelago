@@ -29,6 +29,7 @@ class CivVContext(CommonContext):
     current_location_index = 0
     item_offset = 140319
     logger = logger
+    loc_list = []
     locatiions_to_send = []
 
     def __init__(self, server_address, password):
@@ -78,7 +79,7 @@ async def firetuner_task(ctx: CivVContext):
                     await asyncio.sleep(3)
                     await handle_checked_location(ctx, sock, loop)
                     await asyncio.sleep(3)
-                    # await handle_goal_complete(ctx)
+                    await handle_goal_complete(ctx, sock, loop)
         cont = False
         sock.close()
 
@@ -90,11 +91,8 @@ async def handle_recieve_items(ctx: CivVContext, sock: socket.socket, loop: asyn
         for index, network_item in enumerate(ctx.items_received):
 
             if index >= ctx.current_index:
-                # logger.info(ctx.items_received[0])
-                # logger.info(f"Item: {ctx.current_index}")
                 current_item = ctx.items_received[ctx.current_index]
                 await ctx.tuner.send_command(f"AddTech({current_item[0] - ctx.item_offset + 81})", sock, loop)
-                # await ctx.tuner.send_command("AddGold()", sock, loop)
                 await asyncio.sleep(0.02)
                 ctx.current_index += 1
             await asyncio.sleep(0.02)
@@ -105,26 +103,34 @@ async def handle_recieve_items(ctx: CivVContext, sock: socket.socket, loop: asyn
 
 async def handle_checked_location(ctx: CivVContext, sock: socket.socket, loop: asyncio.AbstractEventLoop):
     result : str
-    loc_list = []
     result = await ctx.tuner.send_command("GetItemsToSend()", sock, loop)
     result_list = result.split(",")
-    for location in range(0, len(result_list)):
-        if result_list[location] == '0' or result_list[location] == '':
+    for index in range(0, len(result_list)):
+        location = result_list[index]
+        if location == '0' or location == '':
             continue
-        elif location in loc_list:
+        elif location == 'True' or location == 'False':
+            continue
+        elif location in ctx.loc_list:
             continue
         else:
-            loc_list.append(location)
-    for index in range(0, len(loc_list)):
+            ctx.loc_list.append(location)
+
+    for index in range(0, len(ctx.loc_list)):
         if index >= ctx.current_location_index:
-            loc = int(loc_list[index])
+            loc = int(ctx.loc_list[index])
+            if loc == False:
+                loc = 1
             ctx.locatiions_to_send.append(loc + ctx.item_offset)
             await ctx.send_msgs([{"cmd": "LocationChecks", "locations": ctx.locatiions_to_send}])
             ctx.current_location_index += 1
+    
 
 
-async def handle_goal_complete(ctx: CivVContext):
-    logger.info("Handle Goal Called")
+async def handle_goal_complete(ctx: CivVContext, sock: socket.socket, loop: asyncio.AbstractEventLoop):
+    goal_complete = await ctx.tuner.send_command("IsVictory()", sock, loop)
+    if goal_complete == "True":
+        await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
 
 def main(connect=None, password=None, name=None):
     Utils.init_logging("Civiliazation V Client")
